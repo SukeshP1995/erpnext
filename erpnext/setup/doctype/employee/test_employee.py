@@ -1,18 +1,16 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
-
 import unittest
 
 import frappe
 import frappe.utils
+from frappe.tests import IntegrationTestCase
 
 import erpnext
 from erpnext.setup.doctype.employee.employee import InactiveEmployeeStatusError
 
-test_records = frappe.get_test_records("Employee")
 
-
-class TestEmployee(unittest.TestCase):
+class TestEmployee(IntegrationTestCase):
 	def test_employee_status_left(self):
 		employee1 = make_employee("test_employee_1@company.com")
 		employee2 = make_employee("test_employee_2@company.com")
@@ -24,6 +22,15 @@ class TestEmployee(unittest.TestCase):
 		employee1_doc.reload()
 		employee1_doc.status = "Left"
 		self.assertRaises(InactiveEmployeeStatusError, employee1_doc.save)
+
+	def test_user_has_employee(self):
+		employee = make_employee("test_emp_user_creation@company.com")
+		employee_doc = frappe.get_doc("Employee", employee)
+		user = employee_doc.user_id
+		self.assertTrue("Employee" in frappe.get_roles(user))
+		employee_doc.user_id = ""
+		employee_doc.save()
+		self.assertTrue("Employee" not in frappe.get_roles(user))
 
 	def tearDown(self):
 		frappe.db.rollback()

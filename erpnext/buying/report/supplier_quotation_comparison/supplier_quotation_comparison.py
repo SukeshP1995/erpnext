@@ -15,6 +15,8 @@ def execute(filters=None):
 	if not filters:
 		return [], []
 
+	validate_filters(filters)
+
 	columns = get_columns(filters)
 	supplier_quotation_data = get_data(filters)
 
@@ -22,6 +24,12 @@ def execute(filters=None):
 	message = get_message()
 
 	return columns, data, message, chart_data
+
+
+def validate_filters(filters):
+	if not filters.get("categorize_by") and filters.get("group_by"):
+		filters["categorize_by"] = filters["group_by"]
+		filters["categorize_by"] = filters["categorize_by"].replace("Group by", "Categorize by")
 
 
 def get_data(filters):
@@ -83,22 +91,12 @@ def prepare_data(supplier_quotation_data, filters):
 	supplier_qty_price_map = {}
 
 	group_by_field = (
-		"supplier_name" if filters.get("group_by") == "Group by Supplier" else "item_code"
+		"supplier_name" if filters.get("categorize_by") == "Categorize by Supplier" else "item_code"
 	)
-	company_currency = frappe.db.get_default("currency")
 	float_precision = cint(frappe.db.get_default("float_precision")) or 2
 
 	for data in supplier_quotation_data:
 		group = data.get(group_by_field)  # get item or supplier value for this row
-
-		supplier_currency = frappe.db.get_value(
-			"Supplier", data.get("supplier_name"), "default_currency"
-		)
-
-		if supplier_currency:
-			exchange_rate = get_exchange_rate(supplier_currency, company_currency)
-		else:
-			exchange_rate = 1
 
 		row = {
 			"item_code": ""
@@ -107,7 +105,7 @@ def prepare_data(supplier_quotation_data, filters):
 			"supplier_name": "" if group_by_field == "supplier_name" else data.get("supplier_name"),
 			"quotation": data.get("parent"),
 			"qty": data.get("qty"),
-			"price": flt(data.get("amount") * exchange_rate, float_precision),
+			"price": flt(data.get("amount"), float_precision),
 			"uom": data.get("uom"),
 			"price_list_currency": data.get("price_list_currency"),
 			"currency": data.get("currency"),
@@ -126,7 +124,7 @@ def prepare_data(supplier_quotation_data, filters):
 		# map for chart preparation of the form {'supplier1': {'qty': 'price'}}
 		supplier = data.get("supplier_name")
 		if filters.get("item_code"):
-			if not supplier in supplier_qty_price_map:
+			if supplier not in supplier_qty_price_map:
 				supplier_qty_price_map[supplier] = {}
 			supplier_qty_price_map[supplier][row["qty"]] = row["price"]
 
@@ -169,7 +167,7 @@ def prepare_chart_data(suppliers, qty_list, supplier_qty_price_map):
 	for supplier in suppliers:
 		entry = supplier_qty_price_map[supplier]
 		for qty in qty_list:
-			if not qty in data_points_map:
+			if qty not in data_points_map:
 				data_points_map[qty] = []
 			if qty in entry:
 				data_points_map[qty].append(entry[qty])
@@ -214,6 +212,13 @@ def get_columns(filters):
 		{"fieldname": "uom", "label": _("UOM"), "fieldtype": "Link", "options": "UOM", "width": 90},
 		{"fieldname": "qty", "label": _("Quantity"), "fieldtype": "Float", "width": 80},
 		{
+			"fieldname": "stock_uom",
+			"label": _("Stock UOM"),
+			"fieldtype": "Link",
+			"options": "UOM",
+			"width": 90,
+		},
+		{
 			"fieldname": "currency",
 			"label": _("Currency"),
 			"fieldtype": "Link",
@@ -226,13 +231,6 @@ def get_columns(filters):
 			"fieldtype": "Currency",
 			"options": "currency",
 			"width": 110,
-		},
-		{
-			"fieldname": "stock_uom",
-			"label": _("Stock UOM"),
-			"fieldtype": "Link",
-			"options": "UOM",
-			"width": 90,
 		},
 		{
 			"fieldname": "price_per_unit",
@@ -278,7 +276,7 @@ def get_columns(filters):
 		},
 	]
 
-	if filters.get("group_by") == "Group by Item":
+	if filters.get("categorize_by") == "Categorize by Item":
 		group_by_columns.reverse()
 
 	columns[0:0] = group_by_columns  # add positioned group by columns to the report
@@ -296,3 +294,13 @@ def get_message():
 		<span class="indicator red">
 		Expires today / Already Expired
 		</span>"""
+
+
+@frappe.whitelist()
+def set_default_supplier(item_code, supplier, company):
+	frappe.db.set_value(
+		"Item Default",
+		{"parent": item_code, "company": company},
+		"default_supplier",
+		supplier,
+	)
